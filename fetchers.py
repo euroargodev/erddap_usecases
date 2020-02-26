@@ -20,7 +20,6 @@ Usage:
 
     argo_loader.region([-85,-45,10.,20.,0,1000.]).to_xarray()
     argo_loader.region([-85,-45,10.,20.,0,1000.,'2012-01','2014-12']).to_xarray()
-    argo_loader.region([-85,-45,10.,20.,0,1000.], CYC=1).to_xarray()
 
 Created by gmaze on 20/12/2019
 """
@@ -44,7 +43,7 @@ class ArgoDataFetcher(object):
         - a space/time rectangular domain, defined by lat/lon/pres/time bounds
     """
 
-    def __init__(self, cachedir='cache', mode='standard'):
+    def __init__(self, cachedir='.', mode='standard'):
         self.fetcher = None
         self.post = None
         self.cachedir = cachedir
