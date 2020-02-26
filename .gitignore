@@ -74,6 +74,7 @@ target/
 cache
 *.nc
 .idea
+*dummy*
 
 # pyenv
 .python-version
