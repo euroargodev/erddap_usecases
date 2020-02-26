@@ -29,5 +29,6 @@ dependencies:
   - pip:
     - kubernetes
     - graphviz
-    - intake-xarray
     - jupyter-server-proxy
+    - erddapy
+    - cmocean
