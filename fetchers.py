@@ -306,7 +306,7 @@ class ArgoDataFetcherBase(object):
         fcache = os.path.join(src, file)
         return fcache
 
-    def to_xarray(self, cache=True):
+    def to_xarray(self, cache=False):
         """ Load Argo data and return a xarray.DataSet """
 
         # Try to load cached file if requested:
@@ -405,8 +405,10 @@ class ArgoDataFetcherBase(object):
         # with this, we are sure to have values even for bad QC data in delayed mode
         ii = argo_d.where(np.isnan(argo_d['PRES_ADJUSTED']), drop=1)['index']
         argo_d['PRES_ADJUSTED'].loc[dict(index=ii)] = argo_d['PRES'].loc[dict(index=ii)]
+
         ii = argo_d.where(np.isnan(argo_d['TEMP_ADJUSTED']), drop=1)['index']
         argo_d['TEMP_ADJUSTED'].loc[dict(index=ii)] = argo_d['TEMP'].loc[dict(index=ii)]
+
         ii = argo_d.where(np.isnan(argo_d['PSAL_ADJUSTED']), drop=1)['index']
         argo_d['PSAL_ADJUSTED'].loc[dict(index=ii)] = argo_d['PSAL'].loc[dict(index=ii)]
 

@@ -9,9 +9,12 @@ http://www.ifremer.fr/erddap
 
 ## Ifremer ERDDAP basic
 
-List of datasets: http://www.ifremer.fr/erddap/tabledap/index.html
-
 Argo data ID: ArgoFloats
+
+Argo dataset information: http://www.ifremer.fr/erddap/info/ArgoFloats/index.html
+
+List of all available datasets: http://www.ifremer.fr/erddap/tabledap/index.html
+
 
 ## Ifremer ERDDAP python library
 
