@@ -96,8 +96,9 @@ class ArgoDataFetcher(object):
             summary.append("User mode: %s" % self.mode)
         return "\n".join(summary)
 
+
     def __empty_processor(self, xds):
-        """ Do nothing to a dataset"""
+        """ Do nothing to a dataset """
         return xds
 
     def float(self, wmo):
@@ -137,6 +138,21 @@ class ArgoDataFetcher(object):
             self.postproccessor = postprocessing
 
         return self
+
+    def deployments(self, box):
+        """ Retrieve deployment locations in a specific space/time region """
+        self.fetcher = ErddapArgoDataFetcher_box_deployments(box=box, **self.fetcher_options)
+
+        if self.dataset_id == 'phy' and self.mode == 'standard':
+            def postprocessing(xds):
+                xds = self.fetcher.filter_data_mode(xds)
+                xds = self.fetcher.filter_qc(xds)
+                return xds
+            self.postproccessor = postprocessing
+
+        return self
+
+        pass
 
     def to_xarray(self, **kwargs):
         """ Fetch and post-process data, return xarray.DataSet """
@@ -386,7 +402,8 @@ class ErddapArgoDataFetcher(ABC):
         # Download data: get a csv, open it as pandas dataframe, convert it to xarrat dataset
         df = pd.read_csv(urlopen(self.url), parse_dates=True, skiprows=[1])
         ds = xr.Dataset.from_dataframe(df)
-        ds['time'].values = np.array(pd.to_datetime(ds['time']), dtype=np.datetime64)
+        df['time'] = pd.to_datetime(df['time'])
+        ds['time'].values = ds['time'].astype(np.datetime64)
 
         # Post-process the xarray.DataSet:
 
@@ -702,3 +719,62 @@ class ErddapArgoDataFetcher_wmo(ErddapArgoDataFetcher):
         listname = self.dataset_id + "_" + listname
         return listname
 
+
+class ErddapArgoDataFetcher_box_deployments(ErddapArgoDataFetcher):
+    """ Manage access to Argo data through Ifremer ERDDAP for: an ocean rectangle and 1st cycles only
+
+        __author__: gmaze@ifremer.fr
+    """
+
+    def init(self, box=[-65,-55,37,38,0,300,'1900-01-01','2100-12-31']):
+        """ Create Argo data loader
+
+            Parameters
+            ----------
+            box : list(float, float, float, float, float, float, str, str)
+                The box domain to load all Argo data for:
+                box = [lon_min, lon_max, lat_min, lat_max, pres_min, pres_max, datim_min, datim_max]
+        """
+        if len(box) == 6:
+            # Use all time line:
+            box.append('1900-01-01')
+            box.append('2100-12-31')
+        elif len(box) != 8:
+            raise ValueError('Box must 6 or 8 length')
+        self.BOX = box
+
+        if self.dataset_id=='phy':
+            self.definition = 'Ifremer erddap Argo data fetcher for deployments in a space/time region'
+        elif self.dataset_id=='ref':
+            self.definition = 'Ifremer erddap Argo REFERENCE data fetcher for deployments in a space/time region'
+
+        return self
+
+    def define_constraints(self):
+        """ Define request constraints """
+        self.erddap.constraints = {'longitude>=': self.BOX[0]}
+        self.erddap.constraints.update({'longitude<=': self.BOX[1]})
+        self.erddap.constraints.update({'latitude>=': self.BOX[2]})
+        self.erddap.constraints.update({'latitude<=': self.BOX[3]})
+        self.erddap.constraints.update({'pres>=': self.BOX[4]})
+        self.erddap.constraints.update({'pres<=': self.BOX[5]})
+        self.erddap.constraints.update({'time>=': self.BOX[6]})
+        self.erddap.constraints.update({'time<=': self.BOX[7]})
+        self.erddap.constraints.update({'cycle_number=~': "1"})
+        return None
+
+    def cname(self, cache=False):
+        """ Return a unique string defining the constraints """
+        BOX = self.BOX
+        if cache:
+            boxname = ("%s_%s_%s_%s_%s_%s_%s_%s_cyc001") % (self._format(BOX[0], 'lon'), self._format(BOX[1], 'lon'),
+                                                     self._format(BOX[2], 'lat'), self._format(BOX[3], 'lat'),
+                                                     self._format(BOX[4], 'prs'), self._format(BOX[5], 'prs'),
+                                                     self._format(BOX[6], 'tim'), self._format(BOX[7], 'tim'))
+        else:
+            boxname = ("[x=%0.2f/%0.2f; y=%0.2f/%0.2f; z=%0.1f/%0.1f; t=%s/%s]; CYC=1") % \
+                      (BOX[0],BOX[1],BOX[2],BOX[3],BOX[4],BOX[5],
+                       self._format(BOX[6], 'tim'), self._format(BOX[7], 'tim'))
+
+        boxname = self.dataset_id + "_" + boxname
+        return boxname
