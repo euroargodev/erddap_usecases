@@ -4,7 +4,28 @@
 
 High level helper methods to load Argo data from the Ifremer erddap server.
 
-Usage:
+Usage (v0.1):
+
+    from fetchers import ArgoDataFetcher
+
+    argo_loader = ArgoDataFetcher()
+or
+    argo_loader = ArgoDataFetcher(cachedir='tmp', cache=True)
+or
+    argo_loader = ArgoDataFetcher(ds='ref')
+
+    argo_loader.profile(6902746, 34).to_xarray()
+    argo_loader.profile(6902746, np.arange(12,45)).to_xarray()
+    argo_loader.profile(6902746, [1,12]).to_xarray()
+
+    argo_loader.float(6902746).to_xarray()
+    argo_loader.float([6902746, 6902747, 6902757, 6902766]).to_xarray()
+    argo_loader.float([6902746, 6902747, 6902757, 6902766], CYC=1).to_xarray()
+
+    argo_loader.region([-85,-45,10.,20.,0,1000.]).to_xarray()
+    argo_loader.region([-85,-45,10.,20.,0,1000.,'2012-01','2014-12']).to_xarray()
+
+Usage (v0.0):
 
     from fetchers import ArgoDataFetcher
 
@@ -33,21 +54,38 @@ import xarray as xr
 import numpy as np
 from erddapy import ERDDAP
 from erddapy.utilities import urlopen
+from abc import ABC, abstractmethod
+from pathlib import Path
 
 
 class ArgoDataFetcher(object):
-    """ Fetch and process Argo data for:
+    """ Fetch and process Argo data.
 
+        Can return data selected from:
         - one or more float(s), defined by WMOs
-        - one or more profile(s), defined for one WMOs and CYCLE NUMBER
-        - a space/time rectangular domain, defined by lat/lon/pres/time bounds
+        - one or more profile(s), defined for one WMO and one or more CYCLE NUMBER
+        - a space/time rectangular domain, defined by lat/lon/pres/time range
+
+        Can return data from the regular Argo dataset ('phy': temperature, salinity) and the Argo referenced
+        dataset used in DMQC ('ref': temperature, salinity).
+
+        This is the main API facade.
+        Specify here all options to fetchers
+
     """
 
-    def __init__(self, cachedir='.', mode='standard'):
+    def __init__(self, mode='standard', backend='erddap', ds='phy', **fetcher_kwargs):
+        # Init sub-methods:
         self.fetcher = None
-        self.post = None
-        self.cachedir = cachedir
-        self.mode = mode
+        self.fetcher_options = {**{'ds':ds}, **fetcher_kwargs}
+        self.postproccessor = self.__empty_processor
+
+        # Facade options:
+        self.mode = mode # User mode determining the level of post-processing required
+        self.dataset_id = ds # Database to use
+        self.backend = backend # fetchers to use
+        if self.backend != 'erddap':
+            raise ValueError("Invalid backend, only 'erddap' available at this point")
 
     def __repr__(self):
         if self.fetcher:
@@ -58,110 +96,123 @@ class ArgoDataFetcher(object):
             summary.append("User mode: %s" % self.mode)
         return "\n".join(summary)
 
-    def float(self, wmo, **kwargs):
+    def __empty_processor(self, xds):
+        """ Do nothing to a dataset"""
+        return xds
+
+    def float(self, wmo):
         """ Load data from a float, given one or more WMOs """
-        self.fetcher = erddap_argo_wmo(WMO=wmo, cachedir=self.cachedir, **kwargs)
+        self.fetcher = ErddapArgoDataFetcher_wmo(WMO=wmo, **self.fetcher_options)
 
-        if self.mode == 'standard':
-            def postprocessing(ds, **kwargs):
-                ds = self.fetcher.filter_data_mode(ds)
-                ds = self.fetcher.filter_qc(ds)
-                return ds
-
-        if self.mode == 'expert':
-            def postprocessing(ds, **kwargs):
-                # No postprocessing, we return everything
-                return ds
-
-        self.post = postprocessing
+        if self.dataset_id == 'phy' and self.mode == 'standard':
+            def postprocessing(xds):
+                xds = self.fetcher.filter_data_mode(xds)
+                xds = self.fetcher.filter_qc(xds)
+                return xds
+            self.postproccessor = postprocessing
         return self
 
-    def profile(self, wmo, cyc, **kwargs):
+    def profile(self, wmo, cyc):
         """ Load data from a profile, given one ormore WMOs and CYCLE_NUMBER """
-        self.fetcher = erddap_argo_wmo(WMO=wmo, CYC=cyc, cachedir=self.cachedir, **kwargs)
+        self.fetcher = ErddapArgoDataFetcher_wmo(WMO=wmo, CYC=cyc, **self.fetcher_options)
 
-        if self.mode == 'standard':
-            def postprocessing(ds, **kwargs):
-                ds = self.fetcher.filter_data_mode(ds)
-                ds = self.fetcher.filter_qc(ds)
-                return ds
+        if self.dataset_id == 'phy' and self.mode == 'standard':
+            def postprocessing(xds):
+                xds = self.fetcher.filter_data_mode(xds)
+                xds = self.fetcher.filter_qc(xds)
+                return xds
+            self.postproccessor = postprocessing
 
-        if self.mode == 'expert':
-            def postprocessing(ds, **kwargs):
-                # No postprocessing, we return everything
-                return ds
-
-        self.post = postprocessing
         return self
 
-    def region(self, box, **kwargs):
+    def region(self, box):
         """ Load data for a rectangular region, given latitude, longitude, pressure and possibly time bounds """
-        self.fetcher = erddap_argo_box(box=box, cachedir=self.cachedir, **kwargs)
+        self.fetcher = ErddapArgoDataFetcher_box(box=box, **self.fetcher_options)
 
-        if self.mode == 'standard':
-            def postprocessing(ds, **kwargs):
-                ds = self.fetcher.filter_data_mode(ds)
-                ds = self.fetcher.filter_qc(ds)
-                return ds
+        if self.dataset_id == 'phy' and self.mode == 'standard':
+            def postprocessing(xds):
+                xds = self.fetcher.filter_data_mode(xds)
+                xds = self.fetcher.filter_qc(xds)
+                return xds
+            self.postproccessor = postprocessing
 
-        if self.mode == 'expert':
-            def postprocessing(ds, **kwargs):
-                # No postprocessing, we return everything
-                return ds
-
-        self.post = postprocessing
         return self
 
     def to_xarray(self, **kwargs):
-        """ Fetch and post-process data as xarray.DataSet """
-        fetcher = self.fetcher
-        ds = fetcher.to_xarray(**kwargs)
-        ds = self.post(ds, **kwargs)
-        return ds
+        """ Fetch and post-process data, return xarray.DataSet """
+        xds = self.fetcher.to_xarray(**kwargs)
+        xds = self.postproccessor(xds)
+        return xds
 
-
-class ArgoDataFetcherBase(object):
+class ErddapArgoDataFetcher(ABC):
     """ Manage access to Argo data through Ifremer ERDDAP
 
         ERDDAP transaction are managed with the erddapy library
 
-        Use environment variable "CACHE_ARGO" to cache files under TSargo_*.nc files
-
         __author__: gmaze@ifremer.fr
     """
 
-    ### Methods to be customised for a specific request:
-    def __init__(self, cachedir=None):
-        """ Create Argo data loader
+    ###
+    # Methods to be customised for a specific request
+    ###
+    @abstractmethod
+    def init(self):
+        """ Initialisation for a specific fetcher """
+        pass
+
+    @abstractmethod
+    def define_constraints(self):
+        """ Define erddapy constraints """
+        pass
+
+    @abstractmethod
+    def cname(self):
+        """ Return a unique string defining the request """
+        pass
+
+    ###
+    # Methods that must not changed
+    ###
+    def __init__(self, ds='phy', cache=False, cachedir=None, **kwargs):
+        """ Instantiate an ERDDAP Argo data loader
 
             Parameters
             ----------
-            cachedir
-
+            db: 'phy' or 'ref'
+            cache : False
+            cachedir : None
         """
-        self._definition = 'Ifremer erddap Argo data fetcher'
-        self._init_erddapy(cachedir)  # Mandatory in the init
+        self.cache = cache
+        self.cachedir = cachedir or os.environ.get('CACHE_ARGO')
+        if self.cache:
+            Path(self.cachedir).mkdir(parents=True, exist_ok=True)
 
-    def define_constraints(self):
-        """ Define erddap.constraints """
-        #         self.erddap.constraints = {'longitude>=': self.BOX[0]} # Example
-        return None
+        self.definition = 'Ifremer erddap Argo data fetcher'
+        self.dataset_id = ds
+        self.init(**kwargs)
+        self._init_erddapy()
 
-    def cname(self, cache=False):
-        """ Return a unique string defining the constraints
-
-            Provide a string for the cache file (cache=1) or a title (cache=0)
-        """
-        return None
-
-    ### Methods that should not changed:
     def __repr__(self):
         if hasattr(self, '_definition'):
-            summary = [ "<datafetcher '%s'>" % self._definition ]
+            summary = [ "<datafetcher '%s'>" % self.definition ]
         else:
             summary = [ "<datafetcher '%s'>" % 'Ifremer erddap Argo data fetcher' ]
         summary.append( "Domain: %s" % self.cname(cache=0) )
         return '\n'.join(summary)
+
+    def _format(self, x, typ):
+        """ string formating helper """
+        if typ=='lon':
+            if x < 0:
+                x = 360. + x
+            return ("%05d") % (x * 100.)
+        if typ=='lat':
+            return ("%05d") % (x * 100.)
+        if typ=='prs':
+            return ("%05d") % (np.abs(x)*10.)
+        if typ=='tim':
+            return pd.to_datetime(x).strftime('%Y%m%d')
+        return str(x)
 
     def _add_history(self, this, txt):
         if 'history' in this.attrs:
@@ -181,7 +232,7 @@ class ArgoDataFetcherBase(object):
                     if this[v].dtype == 'O': # object
                         this[v] = this[v].astype(str)
                     if this[v].dtype == '<U1': # string
-                        ii = this[v] == ' ' # This should not happen, but still !
+                        ii = this[v] == ' ' # This should not happen, but still ! That's real world
                         this[v].loc[dict(index=ii)] = '0'
                     this[v] = this[v].astype(int)
                 except:
@@ -253,35 +304,46 @@ class ArgoDataFetcherBase(object):
             this['PLATFORM_NUMBER'].attrs = {'long_name': 'Float unique identifier',
                              'convention': 'WMO float identifier : A9IIIII'}
 
-
         return this
 
-    def _init_erddapy(self, cachedir):
+    def _init_erddapy(self):
         # Init erddapy
         self.erddap = ERDDAP(
             server='http://www.ifremer.fr/erddap',
             protocol='tabledap'
         )
         self.erddap.response = 'csv'
-        self.erddap.dataset_id = 'ArgoFloats'
-        if not cachedir:
-            self.cache_src = os.environ.get('CACHE_ARGO')
+
+        if self.dataset_id=='phy':
+            self.erddap.dataset_id = 'ArgoFloats'
+        elif self.dataset_id=='ref':
+            self.erddap.dataset_id = 'argo_reference'
         else:
-            self.cache_src = cachedir
+            raise ValueError("Invalid database short name for Ifremer erddap (use: 'phy' or 'ref')")
+        return self
+
 
     def _minimal_vlist(self):
         """ Return the minimal list of variables to retrieve measurements for """
         vlist = list()
-        plist = ['data_mode', 'latitude', 'longitude',
-                 'position_qc', 'time', 'time_qc',
-                 'direction', 'platform_number', 'cycle_number']
-        [vlist.append(p) for p in plist]
-        plist = ['pres', 'temp', 'psal']
-        [vlist.append(p) for p in plist]
-        [vlist.append(p + '_qc') for p in plist]
-        [vlist.append(p + '_adjusted') for p in plist]
-        [vlist.append(p + '_adjusted_qc') for p in plist]
-        [vlist.append(p + '_adjusted_error') for p in plist]
+        if self.dataset_id == 'phy':
+            plist = ['data_mode', 'latitude', 'longitude',
+                     'position_qc', 'time', 'time_qc',
+                     'direction', 'platform_number', 'cycle_number']
+            [vlist.append(p) for p in plist]
+            plist = ['pres', 'temp', 'psal']
+            [vlist.append(p) for p in plist]
+            [vlist.append(p + '_qc') for p in plist]
+            [vlist.append(p + '_adjusted') for p in plist]
+            [vlist.append(p + '_adjusted_qc') for p in plist]
+            [vlist.append(p + '_adjusted_error') for p in plist]
+
+        elif self.dataset_id == 'ref':
+            plist = ['latitude', 'longitude', 'time',
+                     'platform_number', 'cycle_number']
+            [vlist.append(p) for p in plist]
+            plist = ['pres', 'temp', 'psal', 'ptmp']
+            [vlist.append(p) for p in plist]
         return vlist
 
     @property
@@ -299,25 +361,24 @@ class ArgoDataFetcherBase(object):
         return url
 
     @property
-    def cache(self):
+    def cachepath(self):
         """ Return path to cache file for this request """
-        src = self.cache_src
+        src = self.cachedir
         file = ("TSargo_%s.nc") % (self.cname(cache=True))
         fcache = os.path.join(src, file)
         return fcache
 
-    def to_xarray(self, cache=False):
+    def to_xarray(self):
         """ Load Argo data and return a xarray.DataSet """
 
         # Try to load cached file if requested:
-        fcache = self.cache
-        if cache and os.path.exists(fcache):
-            ds = xr.open_dataset(fcache)
+        if self.cache and os.path.exists(self.cachepath):
+            ds = xr.open_dataset(self.cachepath)
             ds = self._cast_types(ds) # Cast data types
             return ds
         # No cache found or requested, so we compute:
 
-        # Download data through csv:
+        # Download data: get a csv, open it as pandas dataframe, convert it to xarrat dataset
         df = pd.read_csv(urlopen(self.url), parse_dates=True, skiprows=[1])
         ds = xr.Dataset.from_dataframe(df)
         ds['time'].values = np.array(pd.to_datetime(ds['time']), dtype=np.datetime64)
@@ -332,27 +393,30 @@ class ArgoDataFetcherBase(object):
                 ds = ds.rename({v: v.upper()})
         ds = ds.set_coords(coords)
 
-        # Cast data types and add attributes:
+        # Cast data types and add variable attributes (not available in the csv download):
         ds = self._cast_types(ds)
         ds = self._add_attributes(ds)
 
         # More convention:
         #         ds = ds.rename({'pres': 'pressure'})
 
-        # Useful attributes:
-        ds.attrs['DATA_ID'] = 'ARGO'
+        # Add useful attributes to the dataset:
+        if self.dataset_id == 'phy':
+            ds.attrs['DATA_ID'] = 'ARGO'
+        elif self.dataset_id == 'ref':
+            ds.attrs['DATA_ID'] = 'ARGO_Reference'
         ds.attrs['DOI'] = 'http://doi.org/10.17882/42182'
         ds.attrs['Downloaded_from'] = self.erddap.server
         ds.attrs['Downloaded_by'] = os.getlogin()
         ds.attrs['Download_date'] = pd.to_datetime('now').strftime('%Y/%m/%d')
         ds.attrs['Download_url'] = self.url
         ds.attrs['Download_constraints'] = self.cname()
-        ds.attrs['cache'] = self.cache
         ds = ds[np.sort(ds.data_vars)]
 
-        # Possible save in cache for later re-use
-        if cache:
-            ds.to_netcdf(fcache)
+        # Possibly save in cache for later re-use
+        if self.cache:
+            ds.attrs['cache'] = self.cachepath
+            ds.to_netcdf(self.cachepath)
 
         #
         return ds
@@ -475,7 +539,9 @@ class ArgoDataFetcherBase(object):
     def filter_qc(self, this, QC_list=[1, 2], drop=True, mode='all', mask=False):
         """ Filter data set according to QC values
 
-            Mask the dataset for points where 'all' or 'any' of the QC fields has a value in the list of integer QC flags.
+            Mask the dataset for points where 'all' or 'any' of the QC fields has a value in the list of
+            integer QC flags.
+
             This method can return the filtered dataset or the filter mask.
         """
         if mode not in ['all', 'any']:
@@ -513,26 +579,20 @@ class ArgoDataFetcherBase(object):
         else:
             return this_mask
 
-class erddap_argo_box(ArgoDataFetcherBase):
+class ErddapArgoDataFetcher_box(ErddapArgoDataFetcher):
     """ Manage access to Argo data through Ifremer ERDDAP for: an ocean rectangle
 
-        ERDDAP transaction are managed with the erddapy library
-        
-        Use environment variable "CACHE_ARGO" to cache files under TSargo_BOX_* 
-        
         __author__: gmaze@ifremer.fr
-
     """
 
-    def __init__(self, box=[-65,-55,37,38,0,300,'1900-01-01','2100-12-31'], cachedir=None):
+    def init(self, box=[-65,-55,37,38,0,300,'1900-01-01','2100-12-31']):
         """ Create Argo data loader
 
             Parameters
             ----------
-            box : list(8*np.float32)
-                The box domain to load all Argo data for
+            box : list(float, float, float, float, float, float, str, str)
+                The box domain to load all Argo data for:
                 box = [lon_min, lon_max, lat_min, lat_max, pres_min, pres_max, datim_min, datim_max]
-
         """
         if len(box) == 6:
             # Use all time line:
@@ -542,13 +602,15 @@ class erddap_argo_box(ArgoDataFetcherBase):
             raise ValueError('Box must 6 or 8 length')
         self.BOX = box
 
-        self._definition = 'Ifremer erddap Argo data fetcher for a space/time region'
+        if self.dataset_id=='phy':
+            self.definition = 'Ifremer erddap Argo data fetcher for a space/time region'
+        elif self.dataset_id=='ref':
+            self.definition = 'Ifremer erddap Argo REFERENCE data fetcher for a space/time region'
 
-        # Init erddapy
-        self._init_erddapy(cachedir)
+        return self
 
-    def define_constraints(self):        
-        """ Define constraints """
+    def define_constraints(self):
+        """ Define request constraints """
         self.erddap.constraints = {'longitude>=': self.BOX[0]}
         self.erddap.constraints.update({'longitude<=': self.BOX[1]})
         self.erddap.constraints.update({'latitude>=': self.BOX[2]})
@@ -558,46 +620,38 @@ class erddap_argo_box(ArgoDataFetcherBase):
         self.erddap.constraints.update({'time>=': self.BOX[6]})
         self.erddap.constraints.update({'time<=': self.BOX[7]})
         return None
-    
+
     def cname(self, cache=False):
-        """ Return a unique string defining the constraints """    
-        def format_lon(x):
-            if x<0:
-                x = 360+x
-            return ("%05d") % (x*100.)
-        def format_lat(y):
-            return ("%05d") % (y*100.)
-        def format_prs(z):
-            return ("%05d") % (np.abs(z)*10.)
+        """ Return a unique string defining the constraints """
         BOX = self.BOX
         if cache:
-            boxname = ("%s_%s_%s_%s_%s_%s_%s_%s") % (format_lon(BOX[0]), format_lon(BOX[1]), 
-                                                    format_lat(BOX[2]), format_lat(BOX[3]), 
-                                                    format_prs(BOX[4]), format_prs(BOX[5]),
-                                                    pd.to_datetime(BOX[6]).strftime('%Y%m%d'), pd.to_datetime(BOX[7]).strftime('%Y%m%d'))
+            boxname = ("%s_%s_%s_%s_%s_%s_%s_%s") % (self._format(BOX[0], 'lon'), self._format(BOX[1], 'lon'),
+                                                     self._format(BOX[2], 'lat'), self._format(BOX[3], 'lat'),
+                                                     self._format(BOX[4], 'prs'), self._format(BOX[5], 'prs'),
+                                                     self._format(BOX[6], 'tim'), self._format(BOX[7], 'tim'))
         else:
-            boxname = ("[x=%0.2f/%0.2f; y=%0.2f/%0.2f; z=%0.1f/%0.1f; t=%s/%s]") % (BOX[0],BOX[1],BOX[2],BOX[3],BOX[4],BOX[5],
-                                                    pd.to_datetime(BOX[6]).strftime('%Y-%m-%d'), pd.to_datetime(BOX[7]).strftime('%Y-%m-%d'))
+            boxname = ("[x=%0.2f/%0.2f; y=%0.2f/%0.2f; z=%0.1f/%0.1f; t=%s/%s]") % \
+                      (BOX[0],BOX[1],BOX[2],BOX[3],BOX[4],BOX[5],
+                       self._format(BOX[6], 'tim'), self._format(BOX[7], 'tim'))
+
+        boxname = self.dataset_id + "_" + boxname
         return boxname
-    
-class erddap_argo_wmo(ArgoDataFetcherBase):
+
+class ErddapArgoDataFetcher_wmo(ErddapArgoDataFetcher):
     """ Manage access to Argo data through Ifremer ERDDAP for: a list of WMOs
 
-        ERDDAP transaction are managed with the erddapy library
-        
-        Use environment variable "CACHE_ARGO" to cache files under TSargo_BOX_* 
-        
         __author__: gmaze@ifremer.fr
     """
-    
-    def __init__(self, WMO=[6902746, 6902757, 6902766], CYC=None, cachedir=None):
+
+    def init(self, WMO=[6902746, 6902757, 6902766], CYC=None):
         """ Create Argo data loader for WMOs
 
             Parameters
             ----------
-            WMO : list(np.int)
+            WMO : list(int)
                 The list of WMOs to load all Argo data for.
-
+            CYC : int, np.array(int), list(int)
+                The cycle numbers to load.
         """
         if isinstance(WMO, int):
             WMO = [WMO] # Make sure we deal with a list
@@ -608,17 +662,18 @@ class erddap_argo_wmo(ArgoDataFetcherBase):
         self.WMO = WMO
         self.CYC = CYC
 
-        self._definition = 'Ifremer erddap Argo data fetcher for floats'
+        if self.dataset_id=='phy':
+            self.definition = 'Ifremer erddap Argo data fetcher for floats'
+        elif self.dataset_id=='ref':
+            self.definition = 'Ifremer erddap Argo REFERENCE data fetcher for floats'
+        return self
 
-        # Init erddapy
-        self._init_erddapy(cachedir)
-
-    def define_constraints(self):        
-        """ Define constraints """
+    def define_constraints(self):
+        """ Define erddap constraints """
         self.erddap.constraints = {'platform_number=~': "|".join(["%i"%i for i in self.WMO])}
         if isinstance(self.CYC, (np.ndarray)):
             self.erddap.constraints.update({'cycle_number=~': "|".join(["%i"%i for i in self.CYC])})
-        return None
+        return self
 
     def cname(self, cache=False):
         """ Return a unique string defining the constraints """
@@ -639,6 +694,6 @@ class erddap_argo_wmo(ArgoDataFetcherBase):
                 listname = [listname]
                 [listname.append("CYC%0.4d" % i) for i in self.CYC]
                 listname = "_".join(listname)
-
+        listname = self.dataset_id + "_" + listname
         return listname
 
