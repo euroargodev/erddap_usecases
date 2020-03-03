@@ -226,25 +226,30 @@ class ErddapArgoDataFetcher(ABC):
 
             This is hard coded, but should be retrieved from an API somewhere
         """
+        def cast_this(da, type):
+            da.values = da.values.astype(type)
+            return da
+
         for v in this.data_vars:
             if "QC" in v:
                 try:
                     if this[v].dtype == 'O': # object
-                        this[v] = this[v].astype(str)
+                        this[v] = cast_this(this[v], str)
                     if this[v].dtype == '<U1': # string
                         ii = this[v] == ' ' # This should not happen, but still ! That's real world
                         this[v].loc[dict(index=ii)] = '0'
-                    this[v] = this[v].astype(int)
+                    this[v] = cast_this(this[v], int)
                 except:
                     print("%s type %s cannot be casted correctly" % (v, this[v].dtype) )
                     raise
 
             if v == 'PLATFORM_NUMBER' and this['PLATFORM_NUMBER'].dtype == 'float64':  # Object
-                this['PLATFORM_NUMBER'] = this['PLATFORM_NUMBER'].astype(int)
+                this['PLATFORM_NUMBER'] = cast_this(this['PLATFORM_NUMBER'], int)
+
             if v == 'DATA_MODE' and this['DATA_MODE'].dtype == 'O':  # Object
-                this['DATA_MODE'] = this['DATA_MODE'].astype(str)
+                this['DATA_MODE'] = cast_this(this['DATA_MODE'], str)
             if v == 'DIRECTION' and this['DIRECTION'].dtype == 'O':  # Object
-                this['DIRECTION'] = this['DIRECTION'].astype(str)
+                this['DIRECTION'] = cast_this(this['DIRECTION'], str)
         return this
 
     def _add_attributes(self, this):
