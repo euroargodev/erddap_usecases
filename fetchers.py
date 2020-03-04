@@ -56,7 +56,7 @@ from erddapy import ERDDAP
 from erddapy.utilities import urlopen
 from abc import ABC, abstractmethod
 from pathlib import Path
-
+import getpass
 
 class ArgoDataFetcher(object):
     """ Fetch and process Argo data.
@@ -429,7 +429,7 @@ class ErddapArgoDataFetcher(ABC):
             ds.attrs['DATA_ID'] = 'ARGO_Reference'
         ds.attrs['DOI'] = 'http://doi.org/10.17882/42182'
         ds.attrs['Downloaded_from'] = self.erddap.server
-        ds.attrs['Downloaded_by'] = os.getlogin()
+        ds.attrs['Downloaded_by'] = getpass.getuser()
         ds.attrs['Download_date'] = pd.to_datetime('now').strftime('%Y/%m/%d')
         ds.attrs['Download_url'] = self.url
         ds.attrs['Download_constraints'] = self.cname()
