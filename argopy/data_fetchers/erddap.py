@@ -21,6 +21,7 @@ from pathlib import Path
 import getpass
 
 access_points = ['box', 'wmo', 'box_deployments']
+exit_formats = ['xarray']
 dataset_ids = ['phy', 'ref']
 
 class ErddapArgoDataFetcher(ABC):
