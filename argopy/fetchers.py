@@ -3,10 +3,12 @@
 """
 
 High level helper methods to load Argo data from the Ifremer erddap server.
+The facade should be able to work with another data access point,
+like another webAPI or a local copy of the ftp.
 
-Usage (v0.1):
+Usage:
 
-    from fetchers import ArgoDataFetcher
+    from argopy import DataFetcher as ArgoDataFetcher
 
     argo_loader = ArgoDataFetcher()
 or
@@ -25,26 +27,8 @@ or
     argo_loader.region([-85,-45,10.,20.,0,1000.]).to_xarray()
     argo_loader.region([-85,-45,10.,20.,0,1000.,'2012-01','2014-12']).to_xarray()
 
-Usage (v0.0):
-
-    from fetchers import ArgoDataFetcher
-
-    argo_loader = ArgoDataFetcher(cachedir='tmp')
-
-    argo_loader.profile(6902746, 34).to_xarray()
-    argo_loader.profile(6902746, np.arange(12,45)).to_xarray()
-    argo_loader.profile(6902746, [1,12]).to_xarray()
-
-    argo_loader.float(6902746).to_xarray()
-    argo_loader.float([6902746, 6902747, 6902757, 6902766]).to_xarray()
-    argo_loader.float([6902746, 6902747, 6902757, 6902766], CYC=1).to_xarray()
-
-    argo_loader.region([-85,-45,10.,20.,0,1000.]).to_xarray()
-    argo_loader.region([-85,-45,10.,20.,0,1000.,'2012-01','2014-12']).to_xarray()
-
 Created by gmaze on 20/12/2019
 """
-__author__ = 'gmaze@ifremer.fr'
 
 import os
 import sys
@@ -95,7 +79,6 @@ class ArgoDataFetcher(object):
             summary = ["<datafetcher 'Not initialised'>"]
             summary.append("User mode: %s" % self.mode)
         return "\n".join(summary)
-
 
     def __empty_processor(self, xds):
         """ Do nothing to a dataset """
@@ -718,7 +701,6 @@ class ErddapArgoDataFetcher_wmo(ErddapArgoDataFetcher):
                 listname = "_".join(listname)
         listname = self.dataset_id + "_" + listname
         return listname
-
 
 class ErddapArgoDataFetcher_box_deployments(ErddapArgoDataFetcher):
     """ Manage access to Argo data through Ifremer ERDDAP for: an ocean rectangle and 1st cycles only

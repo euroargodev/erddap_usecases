@@ -33,7 +33,7 @@ We develop high level helper methods to load Argo data from the Ifremer erddap s
 
 Usage:
 ```python
-    from fetchers import ArgoDataFetcher
+    from argopy.fetchers import ArgoDataFetcher
 
     argo_loader = ArgoDataFetcher()
 
