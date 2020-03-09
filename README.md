@@ -33,9 +33,11 @@ We develop high level helper methods to load Argo data from the Ifremer erddap s
 
 Usage:
 ```python
-    from argopy.fetchers import ArgoDataFetcher
+    from argopy import DataFetcher as ArgoDataFetcher
 
     argo_loader = ArgoDataFetcher()
+    argo_loader = ArgoDataFetcher(backend='erddap')
+    argo_loader = ArgoDataFetcher(cachedir='tmp')
 
     argo_loader.profile(6902746, 34).to_xarray()
     argo_loader.profile(6902746, np.arange(12,45)).to_xarray()
