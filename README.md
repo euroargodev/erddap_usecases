@@ -29,7 +29,7 @@ You can run and edit example notebooks by running this repo on Binder (thanks [P
 
 ### ERDDAP ArgoDataFetcher
 We develop high level helper methods to load Argo data from the Ifremer erddap server. 
-**This library is still in active development and will probably move at some point.**
+**[This library is still in active development and will probably move at some point](https://github.com/euroargodev/erddap_usecases/milestone/1)**.
 
 Usage:
 ```python
