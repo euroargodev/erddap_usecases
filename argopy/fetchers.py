@@ -2,7 +2,7 @@
 # -*coding: UTF-8 -*-
 """
 
-High level helper methods to load Argo data from the Ifremer erddap server.
+High level helper methods to load Argo data from any source (but only Ifremer erddap server at this point).
 The facade should be able to work with another data access point,
 like another webAPI or a local copy of the ftp.
 
@@ -36,11 +36,13 @@ import glob
 import pandas as pd
 import xarray as xr
 import numpy as np
-from erddapy import ERDDAP
-from erddapy.utilities import urlopen
+
 from abc import ABC, abstractmethod
 from pathlib import Path
 import getpass
+
+from erddapy import ERDDAP
+from erddapy.utilities import urlopen
 
 class ArgoDataFetcher(object):
     """ Fetch and process Argo data.
@@ -441,31 +443,31 @@ class ErddapArgoDataFetcher(ABC):
         for v in plist:
             vname = v.upper() + '_ADJUSTED'
             if vname in argo_r:
-                argo_r = argo_r.drop(vname)
+                argo_r = argo_r.drop_vars(vname)
             vname = v.upper() + '_ADJUSTED_QC'
             if vname in argo_r:
-                argo_r = argo_r.drop(vname)
+                argo_r = argo_r.drop_vars(vname)
             vname = v.upper() + '_ADJUSTED_ERROR'
             if vname in argo_r:
-                argo_r = argo_r.drop(vname)
+                argo_r = argo_r.drop_vars(vname)
 
         argo_a = ds.where(ds['DATA_MODE'] == 'A', drop=True)
         for v in plist:
             vname = v.upper()
             if vname in argo_a:
-                argo_a = argo_a.drop(vname)
+                argo_a = argo_a.drop_vars(vname)
             vname = v.upper() + '_QC'
             if vname in argo_a:
-                argo_a = argo_a.drop(vname)
+                argo_a = argo_a.drop_vars(vname)
 
         # argo_d = ds.where(ds['DATA_MODE'] == 'D', drop=True)
         # for v in plist:
         #     vname = v.upper()
         #     if vname in argo_d:
-        #         argo_d = argo_d.drop(vname)
+        #         argo_d = argo_d.drop_vars(vname)
         #     vname = v.upper() + '_QC'
         #     if vname in argo_d:
-        #         argo_d = argo_d.drop(vname)
+        #         argo_d = argo_d.drop_vars(vname)
 
 
         argo_d = ds.where(ds['DATA_MODE'] == 'D', drop=True)
@@ -484,10 +486,10 @@ class ErddapArgoDataFetcher(ABC):
         for v in plist:
             vname = v.upper()
             if vname in argo_d:
-                argo_d = argo_d.drop(vname)
+                argo_d = argo_d.drop_vars(vname)
             vname = v.upper() + '_QC'
             if vname in argo_d:
-                argo_d = argo_d.drop(vname)
+                argo_d = argo_d.drop_vars(vname)
 
         # Then create new arrays with the appropriate variables:
         PRES = xr.merge(
