@@ -726,7 +726,7 @@ class ErddapArgoDataFetcher_box_deployments(ErddapArgoDataFetcher):
         __author__: gmaze@ifremer.fr
     """
 
-    def init(self, box=[-65,-55,37,38,0,300,'1900-01-01','2100-12-31']):
+    def init(self, box=[-180,180,-90,90,0,50,'2020-01-01','2020-01-31']):
         """ Create Argo data loader
 
             Parameters
@@ -736,9 +736,9 @@ class ErddapArgoDataFetcher_box_deployments(ErddapArgoDataFetcher):
                 box = [lon_min, lon_max, lat_min, lat_max, pres_min, pres_max, datim_min, datim_max]
         """
         if len(box) == 6:
-            # Use all time line:
-            box.append('1900-01-01')
-            box.append('2100-12-31')
+            #todo Use last month:
+            box.append('2020-01-01')
+            box.append('2020-01-31')
         elif len(box) != 8:
             raise ValueError('Box must 6 or 8 length')
         self.BOX = box
