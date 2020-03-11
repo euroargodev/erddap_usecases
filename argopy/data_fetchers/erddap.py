@@ -22,7 +22,7 @@ import getpass
 
 access_points = ['box', 'wmo', 'box_deployments']
 exit_formats = ['xarray']
-dataset_ids = ['phy', 'ref']
+dataset_ids = ['phy', 'ref', 'bgc']
 
 class ErddapArgoDataFetcher(ABC):
     """ Manage access to Argo data through Ifremer ERDDAP
@@ -108,21 +108,37 @@ class ErddapArgoDataFetcher(ABC):
             This is hard coded, but should be retrieved from an API somewhere
         """
         def cast_this(da, type):
-            da.values = da.values.astype(type)
+            try:
+                da.values = da.values.astype(type)
+            except ValueError:
+                print("Fail to cast: ", da.dtype, "into:", type)
+                print("Possible values:", np.unique(da))
             return da
 
         for v in this.data_vars:
             if "QC" in v:
-                try:
-                    if this[v].dtype == 'O': # object
-                        this[v] = cast_this(this[v], str)
-                    if this[v].dtype == '<U1': # string
-                        ii = this[v] == ' ' # This should not happen, but still ! That's real world
-                        this[v].loc[dict(index=ii)] = '0'
-                    this[v] = cast_this(this[v], int)
-                except:
-                    print("%s type %s cannot be casted correctly" % (v, this[v].dtype) )
-                    raise
+                if this[v].dtype == 'O': # convert object to string
+                    this[v] = cast_this(this[v], str)
+
+                # Address weird string values:
+
+                if this[v].dtype == '<U3': # string, len 3 because of 'nan'
+                    ii = this[v] == '   ' # This should not happen, but still ! That's real world data
+                    # print('Empty string', np.count_nonzero(ii))
+                    this[v].loc[dict(index=ii)] = '0'
+
+                    ii = this[v] == 'nan' # This should not happen, but still ! That's real world data
+                    this[v].loc[dict(index=ii)] = '0'
+                    # print('nan string', np.count_nonzero(ii))
+
+                    this[v] = cast_this(this[v], np.dtype('U1')) # Get back to regular U1 string
+
+                if this[v].dtype == '<U1': # string
+                    ii = this[v] == ' ' # This should not happen, but still ! That's real world data
+                    this[v].loc[dict(index=ii)] = '0'
+
+                # finally convert strings to integers:
+                this[v] = cast_this(this[v], int)
 
             if v == 'PLATFORM_NUMBER' and this['PLATFORM_NUMBER'].dtype == 'float64':  # Object
                 this['PLATFORM_NUMBER'] = cast_this(this['PLATFORM_NUMBER'], int)
@@ -134,13 +150,14 @@ class ErddapArgoDataFetcher(ABC):
         return this
 
     def _add_attributes(self, this):
-        """ Add variables attributes not return by erddap requests
+        """ Add variables attributes not return by erddap requests (csv)
 
             This is hard coded, but should be retrieved from an API somewhere
         """
         for v in this.data_vars:
             if 'TEMP' in v and '_QC' not in v:
                 this[v].attrs = {'long_name': 'SEA TEMPERATURE IN SITU ITS-90 SCALE',
+                              'standard_name': 'sea_water_temperature',
                               'units': 'degree_Celsius',
                               'valid_min': -2.,
                               'valid_max': 40.,
@@ -151,6 +168,7 @@ class ErddapArgoDataFetcher(ABC):
         for v in this.data_vars:
             if 'PSAL' in v and '_QC' not in v:
                 this[v].attrs = {'long_name': 'PRACTICAL SALINITY',
+                              'standard_name': 'sea_water_salinity',
                               'units': 'psu',
                               'valid_min': 0.,
                               'valid_max': 43.,
@@ -161,10 +179,23 @@ class ErddapArgoDataFetcher(ABC):
         for v in this.data_vars:
             if 'PRES' in v and '_QC' not in v:
                 this[v].attrs = {'long_name': 'Sea Pressure',
+                              'standard_name': 'sea_water_pressure',
                               'units': 'decibar',
                               'valid_min': 0.,
                               'valid_max': 12000.,
-                              'resolution': 0.1}
+                              'resolution': 0.1,
+                              'axis': 'Z'}
+                if 'ERROR' in v:
+                    this[v].attrs['long_name'] = 'ERROR IN %s' % this[v].attrs['long_name']
+
+        for v in this.data_vars:
+            if 'DOXY' in v and '_QC' not in v:
+                this[v].attrs = {'long_name': 'Dissolved oxygen',
+                              'standard_name': 'moles_of_oxygen_per_unit_mass_in_sea_water',
+                              'units': 'micromole/kg',
+                              'valid_min': -5.,
+                              'valid_max': 600.,
+                              'resolution': 0.001}
                 if 'ERROR' in v:
                     this[v].attrs['long_name'] = 'ERROR IN %s' % this[v].attrs['long_name']
 
@@ -204,20 +235,25 @@ class ErddapArgoDataFetcher(ABC):
             self.erddap.dataset_id = 'ArgoFloats'
         elif self.dataset_id=='ref':
             self.erddap.dataset_id = 'argo_reference'
+        elif self.dataset_id=='bgc':
+            self.erddap.dataset_id = 'ArgoFloats-bio'
         else:
-            raise ValueError("Invalid database short name for Ifremer erddap (use: 'phy' or 'ref')")
+            raise ValueError("Invalid database short name for Ifremer erddap (use: 'phy', 'bgc' or 'ref')")
         return self
 
 
     def _minimal_vlist(self):
         """ Return the minimal list of variables to retrieve measurements for """
         vlist = list()
-        if self.dataset_id == 'phy':
+        if self.dataset_id == 'phy' or self.dataset_id == 'bgc':
             plist = ['data_mode', 'latitude', 'longitude',
                      'position_qc', 'time', 'time_qc',
                      'direction', 'platform_number', 'cycle_number']
             [vlist.append(p) for p in plist]
+
             plist = ['pres', 'temp', 'psal']
+            if self.dataset_id == 'bgc':
+                plist = ['pres', 'temp', 'psal', 'doxy']
             [vlist.append(p) for p in plist]
             [vlist.append(p + '_qc') for p in plist]
             [vlist.append(p + '_adjusted') for p in plist]
@@ -230,6 +266,7 @@ class ErddapArgoDataFetcher(ABC):
             [vlist.append(p) for p in plist]
             plist = ['pres', 'temp', 'psal', 'ptmp']
             [vlist.append(p) for p in plist]
+
         return vlist
 
     @property
@@ -250,7 +287,7 @@ class ErddapArgoDataFetcher(ABC):
     def cachepath(self):
         """ Return path to cache file for this request """
         src = self.cachedir
-        file = ("TSargo_%s.nc") % (self.cname(cache=True))
+        file = ("ERargo_%s.nc") % (self.cname(cache=True))
         fcache = os.path.join(src, file)
         return fcache
 
@@ -292,6 +329,8 @@ class ErddapArgoDataFetcher(ABC):
             ds.attrs['DATA_ID'] = 'ARGO'
         elif self.dataset_id == 'ref':
             ds.attrs['DATA_ID'] = 'ARGO_Reference'
+        if self.dataset_id == 'bgc':
+            ds.attrs['DATA_ID'] = 'ARGO-BGC'
         ds.attrs['DOI'] = 'http://doi.org/10.17882/42182'
         ds.attrs['Downloaded_from'] = self.erddap.server
         ds.attrs['Downloaded_by'] = getpass.getuser()
@@ -311,58 +350,68 @@ class ErddapArgoDataFetcher(ABC):
     def filter_data_mode(self, ds, keep_error=True):
         """ Filter variables according to their data mode
 
-            For data mode 'R' and 'A': keep 'PRES', 'TEMP' and 'PSAL'
-            For data mode 'D': keep 'PRES_ADJUSTED', 'TEMP_ADJUSTED' and 'PSAL_ADJUSTED'
+            For data mode 'R' and 'A': keep <PARAM> (eg: 'PRES', 'TEMP' and 'PSAL')
+            For data mode 'D': keep <PARAM_ADJUSTED> (eg: 'PRES_ADJUSTED', 'TEMP_ADJUSTED' and 'PSAL_ADJUSTED')
 
-            this applies to <PARAM> and <PARAM_QC>
+            This applies to <PARAM> and <PARAM_QC>
         """
-        plist = ['pres', 'temp', 'psal']
 
-        # Filter data according to data_mode:
-        argo_r = ds.where(ds['DATA_MODE'] == 'R', drop=True)
-        for v in plist:
-            vname = v.upper() + '_ADJUSTED'
-            if vname in argo_r:
-                argo_r = argo_r.drop_vars(vname)
-            vname = v.upper() + '_ADJUSTED_QC'
-            if vname in argo_r:
-                argo_r = argo_r.drop_vars(vname)
-            vname = v.upper() + '_ADJUSTED_ERROR'
-            if vname in argo_r:
-                argo_r = argo_r.drop_vars(vname)
+        # Define variables to filter:
+        if self.dataset_id == 'phy':
+            plist = ['pres', 'temp', 'psal']
+        elif self.dataset_id == 'bgc':
+            plist = ['pres', 'temp', 'psal', 'doxy']
+        else:
+            raise ValueError('Data mode filtering not necessary for Reference dataset')
 
-        argo_a = ds.where(ds['DATA_MODE'] == 'A', drop=True)
-        for v in plist:
-            vname = v.upper()
-            if vname in argo_a:
-                argo_a = argo_a.drop_vars(vname)
-            vname = v.upper() + '_QC'
-            if vname in argo_a:
-                argo_a = argo_a.drop_vars(vname)
+        def ds_split_datamode(xds):
+            """ Create one dataset for each of the data_mode
 
-        # argo_d = ds.where(ds['DATA_MODE'] == 'D', drop=True)
-        # for v in plist:
-        #     vname = v.upper()
-        #     if vname in argo_d:
-        #         argo_d = argo_d.drop_vars(vname)
-        #     vname = v.upper() + '_QC'
-        #     if vname in argo_d:
-        #         argo_d = argo_d.drop_vars(vname)
+                Split full dataset into 3 datasets
+            """
+            # Real-time:
+            argo_r = ds.where(ds['DATA_MODE'] == 'R', drop=True)
+            for v in plist:
+                vname = v.upper() + '_ADJUSTED'
+                if vname in argo_r:
+                    argo_r = argo_r.drop_vars(vname)
+                vname = v.upper() + '_ADJUSTED_QC'
+                if vname in argo_r:
+                    argo_r = argo_r.drop_vars(vname)
+                vname = v.upper() + '_ADJUSTED_ERROR'
+                if vname in argo_r:
+                    argo_r = argo_r.drop_vars(vname)
+            # Real-time adjusted:
+            argo_a = ds.where(ds['DATA_MODE'] == 'A', drop=True)
+            for v in plist:
+                vname = v.upper()
+                if vname in argo_a:
+                    argo_a = argo_a.drop_vars(vname)
+                vname = v.upper() + '_QC'
+                if vname in argo_a:
+                    argo_a = argo_a.drop_vars(vname)
+            # Delayed mode:
+            argo_d = ds.where(ds['DATA_MODE'] == 'D', drop=True)
+            return argo_r, argo_a, argo_d
 
+        argo_r, argo_a, argo_d = ds_split_datamode(ds)
 
-        argo_d = ds.where(ds['DATA_MODE'] == 'D', drop=True)
+        def fill_adjusted_nan(ds, vname):
+            """Fill in the adjusted field with the non-adjusted wherever it is NaN
 
-        # Fill in the adjusted field with the non-adjusted wherever it is NaN
-        # with this, we are sure to have values even for bad QC data in delayed mode
-        ii = argo_d.where(np.isnan(argo_d['PRES_ADJUSTED']), drop=1)['index']
-        argo_d['PRES_ADJUSTED'].loc[dict(index=ii)] = argo_d['PRES'].loc[dict(index=ii)]
+               Ensure to have values even for bad QC data in delayed mode
+            """
+            ii = ds.where(np.isnan(ds[vname+'_ADJUSTED']), drop=1)['index']
+            ds[vname+'_ADJUSTED'].loc[dict(index=ii)] = ds[vname].loc[dict(index=ii)]
+            return ds
 
-        ii = argo_d.where(np.isnan(argo_d['TEMP_ADJUSTED']), drop=1)['index']
-        argo_d['TEMP_ADJUSTED'].loc[dict(index=ii)] = argo_d['TEMP'].loc[dict(index=ii)]
+        argo_d = fill_adjusted_nan(argo_d, 'PRES')
+        argo_d = fill_adjusted_nan(argo_d, 'TEMP')
+        argo_d = fill_adjusted_nan(argo_d, 'PSAL')
+        if 'doxy' in plist:
+            argo_d = fill_adjusted_nan(argo_d, 'DOXY')
 
-        ii = argo_d.where(np.isnan(argo_d['PSAL_ADJUSTED']), drop=1)['index']
-        argo_d['PSAL_ADJUSTED'].loc[dict(index=ii)] = argo_d['PSAL'].loc[dict(index=ii)]
-
+        # Drop QC fields in delayed mode dataset:
         for v in plist:
             vname = v.upper()
             if vname in argo_d:
@@ -372,40 +421,46 @@ class ErddapArgoDataFetcher(ABC):
                 argo_d = argo_d.drop_vars(vname)
 
         # Then create new arrays with the appropriate variables:
-        PRES = xr.merge(
-            (argo_r['PRES'], argo_a['PRES_ADJUSTED'].rename('PRES'), argo_d['PRES_ADJUSTED'].rename('PRES')))
-        PRES_QC = xr.merge((argo_r['PRES_QC'], argo_a['PRES_ADJUSTED_QC'].rename('PRES_QC'),
-                            argo_d['PRES_ADJUSTED_QC'].rename('PRES_QC')))
-        if keep_error:
-            PRES_ERROR = xr.merge((argo_a['PRES_ADJUSTED_ERROR'].rename('PRES_ERROR'),
-                                   argo_d['PRES_ADJUSTED_ERROR'].rename('PRES_ERROR')))
-            PRES = xr.merge((PRES, PRES_QC, PRES_ERROR))
-        else:
-            PRES = xr.merge((PRES, PRES_QC))
+        def new_arrays(argo_r, argo_a, argo_d, vname):
+            """ Merge the 3 datasets into a single ine with the appropriate fields
 
-        TEMP = xr.merge(
-            (argo_r['TEMP'], argo_a['TEMP_ADJUSTED'].rename('TEMP'), argo_d['TEMP_ADJUSTED'].rename('TEMP')))
-        TEMP_QC = xr.merge((argo_r['TEMP_QC'], argo_a['TEMP_ADJUSTED_QC'].rename('TEMP_QC'),
-                            argo_d['TEMP_ADJUSTED_QC'].rename('TEMP_QC')))
-        if keep_error:
-            TEMP_ERROR = xr.merge((argo_a['TEMP_ADJUSTED_ERROR'].rename('TEMP_ERROR'),
-                                   argo_d['TEMP_ADJUSTED_ERROR'].rename('TEMP_ERROR')))
-            TEMP = xr.merge((TEMP, TEMP_QC, TEMP_ERROR))
-        else:
-            TEMP = xr.merge((TEMP, TEMP_QC))
+                Homogeneise variable names.
+                Based on xarray merge function with ’no_conflicts’: only values
+                which are not null in both datasets must be equal. The returned
+                dataset then contains the combination of all non-null values.
 
-        PSAL = xr.merge(
-            (argo_r['PSAL'], argo_a['PSAL_ADJUSTED'].rename('PSAL'), argo_d['PSAL_ADJUSTED'].rename('PSAL')))
-        PSAL_QC = xr.merge((argo_r['PSAL_QC'], argo_a['PSAL_ADJUSTED_QC'].rename('PSAL_QC'),
-                            argo_d['PSAL_ADJUSTED_QC'].rename('PSAL_QC')))
-        if keep_error:
-            PSAL_ERROR = xr.merge((argo_a['PSAL_ADJUSTED_ERROR'].rename('PSAL_ERROR'),
-                                   argo_d['PSAL_ADJUSTED_ERROR'].rename('PSAL_ERROR')))
-            PSAL = xr.merge((PSAL, PSAL_QC, PSAL_ERROR))
-        else:
-            PSAL = xr.merge((PSAL, PSAL_QC))
+                Return a xarray.DataArray
+            """
+            DS = xr.merge(
+                (argo_r[vname],
+                 argo_a[vname+'_ADJUSTED'].rename(vname),
+                 argo_d[vname+'_ADJUSTED'].rename(vname)))
+            DS_QC = xr.merge((
+                        argo_r[vname+'_QC'],
+                        argo_a[vname+'_ADJUSTED_QC'].rename(vname+'_QC'),
+                        argo_d[vname+'_ADJUSTED_QC'].rename(vname+'_QC')))
+            if keep_error:
+                DS_ERROR = xr.merge((
+                        argo_a[vname+'_ADJUSTED_ERROR'].rename(vname+'_ERROR'),
+                        argo_d[vname+'_ADJUSTED_ERROR'].rename(vname+'_ERROR')))
+                DS = xr.merge((DS, DS_QC, DS_ERROR))
+            else:
+                DS = xr.merge((DS, DS_QC))
+            return DS
 
-        final = xr.merge((TEMP, PSAL, PRES))
+        PRES = new_arrays(argo_r, argo_a, argo_d, 'PRES')
+        TEMP = new_arrays(argo_r, argo_a, argo_d, 'TEMP')
+        PSAL = new_arrays(argo_r, argo_a, argo_d, 'PSAL')
+        if 'doxy' in plist:
+            DOXY = new_arrays(argo_r, argo_a, argo_d, 'DOXY')
+
+        # Create final dataset by merging all available variables
+        if 'doxy' in plist:
+            final = xr.merge((TEMP, PSAL, PRES, DOXY))
+        else:
+            final = xr.merge((TEMP, PSAL, PRES))
+
+        # Merge with additional content:
         plist = ['position_qc', 'time', 'time_qc', 'data_mode',
                  'direction', 'platform_number', 'cycle_number']
         for p in plist:
@@ -418,9 +473,11 @@ class ErddapArgoDataFetcher(ABC):
         final.attrs = ds.attrs
         final = self._add_history(final, 'Variables selected according to DATA_MODE')
         final = final[np.sort(final.data_vars)]
+
         # Cast data types and add attributes:
         final = self._cast_types(final)
         final = self._add_attributes(final)
+
         return final
 
     def filter_qc(self, this, QC_list=[1, 2], drop=True, mode='all', mask=False):
@@ -600,7 +657,7 @@ class ArgoDataFetcher_box_deployments(ErddapArgoDataFetcher):
                 box = [lon_min, lon_max, lat_min, lat_max, pres_min, pres_max, datim_min, datim_max]
         """
         if len(box) == 6:
-            #todo Use last month:
+            #todo Use last current month
             box.append('2020-01-01')
             box.append('2020-01-31')
         elif len(box) != 8:

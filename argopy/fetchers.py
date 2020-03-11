@@ -59,6 +59,9 @@ class ArgoDataFetcher(object):
 
     def __init__(self, mode='standard', backend='erddap', ds='phy', **fetcher_kwargs):
 
+        if mode not in ['standard', 'expert']:
+            raise ValueError("Mode must be 'standard' or 'expert'")
+
         # Init sub-methods:
         self.fetcher = None
         self.fetcher_options = {**{'ds':ds}, **fetcher_kwargs}
@@ -82,6 +85,7 @@ class ArgoDataFetcher(object):
             summary.append("User mode: %s" % self.mode)
         else:
             summary = ["<datafetcher 'Not initialised'>"]
+            summary.append("Fetchers: 'profile', 'float' or 'region'")
             summary.append("User mode: %s" % self.mode)
         return "\n".join(summary)
 
@@ -89,14 +93,25 @@ class ArgoDataFetcher(object):
         """ Do nothing to a dataset """
         return xds
 
+    def __drop_vars(self, xds):
+        """ Drop Jargon variables for standard users """
+        drop_list = ['DATA_MODE', 'DIRECTION']
+        xds = xds.drop_vars(drop_list)
+        # Also drop all QC variables:
+        for v in xds.data_vars:
+            if "QC" in v:
+                xds = xds.drop_vars(v)
+        return xds
+
     def float(self, wmo):
         """ Load data from a float, given one or more WMOs """
         self.fetcher = self.Fetcher_wmo(WMO=wmo, **self.fetcher_options)
 
-        if self.dataset_id == 'phy' and self.mode == 'standard':
+        if self.mode == 'standard' and (self.dataset_id == 'phy' or self.dataset_id == 'bgc'):
             def postprocessing(xds):
                 xds = self.fetcher.filter_data_mode(xds)
                 xds = self.fetcher.filter_qc(xds)
+                xds = self.__drop_vars(xds)
                 return xds
             self.postproccessor = postprocessing
         return self
@@ -105,10 +120,11 @@ class ArgoDataFetcher(object):
         """ Load data from a profile, given one ormore WMOs and CYCLE_NUMBER """
         self.fetcher = self.Fetcher_wmo(WMO=wmo, CYC=cyc, **self.fetcher_options)
 
-        if self.dataset_id == 'phy' and self.mode == 'standard':
+        if self.mode == 'standard' and (self.dataset_id == 'phy' or self.dataset_id == 'bgc'):
             def postprocessing(xds):
                 xds = self.fetcher.filter_data_mode(xds)
                 xds = self.fetcher.filter_qc(xds)
+                xds = self.__drop_vars(xds)
                 return xds
             self.postproccessor = postprocessing
 
@@ -118,10 +134,11 @@ class ArgoDataFetcher(object):
         """ Load data for a rectangular region, given latitude, longitude, pressure and possibly time bounds """
         self.fetcher = self.Fetcher_box(box=box, **self.fetcher_options)
 
-        if self.dataset_id == 'phy' and self.mode == 'standard':
+        if self.mode == 'standard' and (self.dataset_id == 'phy' or self.dataset_id == 'bgc'):
             def postprocessing(xds):
                 xds = self.fetcher.filter_data_mode(xds)
                 xds = self.fetcher.filter_qc(xds)
+                xds = self.__drop_vars(xds)
                 return xds
             self.postproccessor = postprocessing
 
@@ -131,16 +148,15 @@ class ArgoDataFetcher(object):
         """ Retrieve deployment locations in a specific space/time region """
         self.fetcher = ErddapArgoDataFetcher_box_deployments(box=box, **self.fetcher_options)
 
-        if self.dataset_id == 'phy' and self.mode == 'standard':
+        if self.mode == 'standard' and (self.dataset_id == 'phy' or self.dataset_id == 'bgc'):
             def postprocessing(xds):
                 xds = self.fetcher.filter_data_mode(xds)
                 xds = self.fetcher.filter_qc(xds)
+                xds = self.__drop_vars(xds)
                 return xds
             self.postproccessor = postprocessing
 
         return self
-
-        pass
 
     def to_xarray(self, **kwargs):
         """ Fetch and post-process data, return xarray.DataSet """
