@@ -14,7 +14,9 @@ import xarray as xr
 import numpy as np
 
 from erddapy import ERDDAP
-from erddapy.utilities import urlopen
+from erddapy.utilities import urlopen # Thin wrapper around requests get content
+import copy
+from erddapy.utilities import parse_dates, quote_string_constraints
 
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -23,6 +25,43 @@ import getpass
 access_points = ['box', 'wmo', 'box_deployments']
 exit_formats = ['xarray']
 dataset_ids = ['phy', 'ref', 'bgc']
+
+import requests
+import io
+from IPython.core.display import display, HTML
+
+def urlopen(url):
+    """ Load content from url or raise alarm on status with explicit information on the error
+
+    """
+    # https://github.com/ioos/erddapy/blob/3828a4f479e7f7653fb5fd78cbce8f3b51bd0661/erddapy/utilities.py#L37
+    r = requests.get(url)
+    data = io.BytesIO(r.content).read()
+
+    if r.status_code == 200:  # OK
+        return data
+
+    # 4XX client error response
+    elif r.status_code == 404:  # Empty response
+        error = ["Error %i " % r.status_code]
+        error.append(data.decode("utf-8").replace("Error", ""))
+        error.append("%s" % url)
+        raise requests.HTTPError("\n".join(error))
+
+    # 5XX server error response
+    elif r.status_code == 500:  # 500 Internal Server Error
+        if "text/html" in r.headers.get('content-type'):
+            display(HTML(data.decode("utf-8")))
+        error = ["Error %i " % r.status_code]
+        error.append(data.decode("utf-8"))
+        error.append("%s" % url)
+        raise requests.HTTPError("\n".join(error))
+    else:
+        error = ["Error %i " % r.status_code]
+        error.append(data.decode("utf-8"))
+        error.append("%s" % url)
+        print("\n".join(error))
+        r.raise_for_status()
 
 class ErddapArgoDataFetcher(ABC):
     """ Manage access to Argo data through Ifremer ERDDAP
@@ -270,8 +309,21 @@ class ErddapArgoDataFetcher(ABC):
         return vlist
 
     @property
-    def url(self):
-        """ Return the URL used to download data """
+    def cachepath(self):
+        """ Return path to cache file for this request """
+        src = self.cachedir
+        file = ("ERargo_%s.nc") % (self.cname(cache=True))
+        fcache = os.path.join(src, file)
+        return fcache
+
+    @property
+    def url(self, response=None):
+        """ Return the URL used to download data
+
+        """
+        # Replace erddapy get_download_url
+        # We need to replace it to better handle http responses with by-passing the _check_url_response
+        # https://github.com/ioos/erddapy/blob/fa1f2c15304938cd0aa132946c22b0427fd61c81/erddapy/erddapy.py#L247
 
         # Define constraint to select this box of data:
         self.define_constraints()  # This will affect self.erddap.constraints
@@ -279,17 +331,33 @@ class ErddapArgoDataFetcher(ABC):
         # Define the list of variables to retrieve
         self.erddap.variables = self._minimal_vlist()
 
-        # Get download URL:
-        url = self.erddap.get_download_url(response='csv') + '&distinct()&orderBy("time,pres")'
-        return url
+        #
+        dataset_id = self.erddap.dataset_id
+        protocol = self.erddap.protocol
+        variables = self.erddap.variables
+        if not response:
+            response = self.erddap.response
+        constraints = self.erddap.constraints
+        url = f"{self.erddap.server}/{protocol}/{dataset_id}.{response}?"
+        if variables:
+            variables = ",".join(variables)
+            url += f"{variables}"
 
-    @property
-    def cachepath(self):
-        """ Return path to cache file for this request """
-        src = self.cachedir
-        file = ("ERargo_%s.nc") % (self.cname(cache=True))
-        fcache = os.path.join(src, file)
-        return fcache
+        if constraints:
+            _constraints = copy.copy(constraints)
+            for k, v in _constraints.items():
+                if k.startswith("time"):
+                    _constraints.update({k: parse_dates(v)})
+            _constraints = quote_string_constraints(_constraints)
+            _constraints = "".join([f"&{k}{v}" for k, v in _constraints.items()])
+
+            url += f"{_constraints}"
+
+        url += '&distinct()&orderBy("time,pres")'
+        # In erddapy:
+        # url = _distinct(url, **kwargs)
+        # return _check_url_response(url, **self.requests_kwargs)
+        return url
 
     def to_xarray(self):
         """ Load Argo data and return a xarray.DataSet """
