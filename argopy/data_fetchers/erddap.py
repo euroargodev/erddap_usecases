@@ -13,8 +13,9 @@ import pandas as pd
 import xarray as xr
 import numpy as np
 
+from argopy.utilities import urlopen
+
 from erddapy import ERDDAP
-from erddapy.utilities import urlopen # Thin wrapper around requests get content
 import copy
 from erddapy.utilities import parse_dates, quote_string_constraints
 
@@ -22,46 +23,9 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 import getpass
 
-access_points = ['box', 'wmo', 'box_deployments']
+access_points = ['box', 'wmo']
 exit_formats = ['xarray']
 dataset_ids = ['phy', 'ref', 'bgc']
-
-import requests
-import io
-from IPython.core.display import display, HTML
-
-def urlopen(url):
-    """ Load content from url or raise alarm on status with explicit information on the error
-
-    """
-    # https://github.com/ioos/erddapy/blob/3828a4f479e7f7653fb5fd78cbce8f3b51bd0661/erddapy/utilities.py#L37
-    r = requests.get(url)
-    data = io.BytesIO(r.content).read()
-
-    if r.status_code == 200:  # OK
-        return data
-
-    # 4XX client error response
-    elif r.status_code == 404:  # Empty response
-        error = ["Error %i " % r.status_code]
-        error.append(data.decode("utf-8").replace("Error", ""))
-        error.append("%s" % url)
-        raise requests.HTTPError("\n".join(error))
-
-    # 5XX server error response
-    elif r.status_code == 500:  # 500 Internal Server Error
-        if "text/html" in r.headers.get('content-type'):
-            display(HTML(data.decode("utf-8")))
-        error = ["Error %i " % r.status_code]
-        error.append(data.decode("utf-8"))
-        error.append("%s" % url)
-        raise requests.HTTPError("\n".join(error))
-    else:
-        error = ["Error %i " % r.status_code]
-        error.append(data.decode("utf-8"))
-        error.append("%s" % url)
-        print("\n".join(error))
-        r.raise_for_status()
 
 class ErddapArgoDataFetcher(ABC):
     """ Manage access to Argo data through Ifremer ERDDAP
@@ -280,7 +244,6 @@ class ErddapArgoDataFetcher(ABC):
             raise ValueError("Invalid database short name for Ifremer erddap (use: 'phy', 'bgc' or 'ref')")
         return self
 
-
     def _minimal_vlist(self):
         """ Return the minimal list of variables to retrieve measurements for """
         vlist = list()
@@ -307,6 +270,7 @@ class ErddapArgoDataFetcher(ABC):
             [vlist.append(p) for p in plist]
 
         return vlist
+
 
     @property
     def cachepath(self):

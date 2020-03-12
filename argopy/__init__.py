@@ -5,4 +5,4 @@ from .fetchers import ArgoDataFetcher as DataFetcher
 from .xarray import ArgoAccessor
 
 # Other Import
-# from . import data_fetchers
+from . import utilities
