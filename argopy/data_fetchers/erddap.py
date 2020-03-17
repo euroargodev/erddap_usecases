@@ -105,10 +105,11 @@ class ErddapArgoDataFetcher(ABC):
             this.attrs['history'] = txt
         return this
 
-    def _cast_types(self, this):
+    def _cast_types_deprec(self, this):
         """ Make sure variables are of the appropriate types
 
             This is hard coded, but should be retrieved from an API somewhere
+            #todo move this to the xarray argo accessor
         """
         def cast_this(da, type):
             try:
@@ -125,14 +126,13 @@ class ErddapArgoDataFetcher(ABC):
 
                 # Address weird string values:
 
-                if this[v].dtype == '<U3': # string, len 3 because of 'nan'
+                if this[v].dtype == '<U3': # string, len 3 because of a 'nan' somewhere
                     ii = this[v] == '   ' # This should not happen, but still ! That's real world data
                     # print('Empty string', np.count_nonzero(ii))
                     this[v].loc[dict(index=ii)] = '0'
 
                     ii = this[v] == 'nan' # This should not happen, but still ! That's real world data
                     this[v].loc[dict(index=ii)] = '0'
-                    # print('nan string', np.count_nonzero(ii))
 
                     this[v] = cast_this(this[v], np.dtype('U1')) # Get back to regular U1 string
 
@@ -329,7 +329,7 @@ class ErddapArgoDataFetcher(ABC):
         # Try to load cached file if requested:
         if self.cache and os.path.exists(self.cachepath):
             ds = xr.open_dataset(self.cachepath)
-            ds = self._cast_types(ds) # Cast data types
+            ds = ds.argo.cast_types() # Cast data types
             return ds
         # No cache found or requested, so we compute:
 
@@ -350,7 +350,7 @@ class ErddapArgoDataFetcher(ABC):
         ds = ds.set_coords(coords)
 
         # Cast data types and add variable attributes (not available in the csv download):
-        ds = self._cast_types(ds)
+        ds = ds.argo.cast_types()
         ds = self._add_attributes(ds)
 
         # More convention:
@@ -507,7 +507,7 @@ class ErddapArgoDataFetcher(ABC):
         final = final[np.sort(final.data_vars)]
 
         # Cast data types and add attributes:
-        final = self._cast_types(final)
+        final = final.argo.cast_types()
         final = self._add_attributes(final)
 
         return final
@@ -549,7 +549,7 @@ class ErddapArgoDataFetcher(ABC):
                 if "QC" in v:
                     this[v] = this[v].astype(int)
             this = self._add_history(this, 'Variables selected according to QC')
-            this = self._cast_types(this)
+            this = this.argo.cast_types()
             this = self._add_attributes(this)
             return this
         else:
