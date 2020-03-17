@@ -128,7 +128,6 @@ class ErddapArgoDataFetcher(ABC):
 
                 if this[v].dtype == '<U3': # string, len 3 because of a 'nan' somewhere
                     ii = this[v] == '   ' # This should not happen, but still ! That's real world data
-                    # print('Empty string', np.count_nonzero(ii))
                     this[v].loc[dict(index=ii)] = '0'
 
                     ii = this[v] == 'nan' # This should not happen, but still ! That's real world data
