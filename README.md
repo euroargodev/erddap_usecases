@@ -29,9 +29,9 @@ You can run and edit example notebooks by running this repo on Binder (thanks [P
 
 ### Argo Data Fetcher
 We develop high level helper methods to load Argo data that is available for the Ifremer erddap server. 
-**[This library is still in active development and will probably move at some point](https://github.com/euroargodev/erddap_usecases/milestone/1)**.
+**[The ``argopy`` library is still in active development](https://github.com/euroargodev/argopy)**.
 
-Usage:
+Usage to fetch Argo data from the erddap:
 ```python
     from argopy import DataFetcher as ArgoDataFetcher
 
